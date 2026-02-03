@@ -2,35 +2,29 @@ local M = {}
 
 -- Get the git root directory
 local function get_git_root()
-  local handle = io.popen("git rev-parse --show-toplevel 2>/dev/null")
-  if not handle then
+  local result = vim.fn.system("git rev-parse --show-toplevel")
+  if vim.v.shell_error ~= 0 then
     return nil
   end
-  local result = handle:read("*a")
-  handle:close()
-  return result:gsub("%s+$", "")
+  return vim.fn.trim(result)
 end
 
 -- Get the git remote URL
 local function get_git_remote_url()
-  local handle = io.popen("git config --get remote.origin.url 2>/dev/null")
-  if not handle then
+  local result = vim.fn.system("git config --get remote.origin.url")
+  if vim.v.shell_error ~= 0 then
     return nil
   end
-  local result = handle:read("*a")
-  handle:close()
-  return result:gsub("%s+$", "")
+  return vim.fn.trim(result)
 end
 
 -- Get the current branch name
 local function get_current_branch()
-  local handle = io.popen("git rev-parse --abbrev-ref HEAD 2>/dev/null")
-  if not handle then
+  local result = vim.fn.system("git rev-parse --abbrev-ref HEAD")
+  if vim.v.shell_error ~= 0 then
     return "main"
   end
-  local result = handle:read("*a")
-  handle:close()
-  local branch = result:gsub("%s+$", "")
+  local branch = vim.fn.trim(result)
   return branch ~= "" and branch or "main"
 end
 
@@ -87,20 +81,39 @@ end
 -- Open URL in browser
 local function open_url(url)
   local cmd
+  
   if vim.fn.has("mac") == 1 then
-    cmd = "open"
+    cmd = { "open", url }
   elseif vim.fn.has("unix") == 1 then
-    cmd = "xdg-open"
+    cmd = { "xdg-open", url }
   elseif vim.fn.has("win32") == 1 then
-    cmd = "start"
+    -- Windows requires special handling with proper escaping
+    -- Escape special characters for cmd.exe
+    local escaped_url = url:gsub('"', '""')  -- Escape double quotes
+    escaped_url = escaped_url:gsub('&', '^&')  -- Escape ampersands
+    escaped_url = escaped_url:gsub('%%', '%%')  -- Escape percent signs
+    escaped_url = escaped_url:gsub('%^', '^^')  -- Escape carets
+    cmd = string.format('cmd.exe /c start "" "%s"', escaped_url)
+    local result = vim.fn.system(cmd)
+    return vim.v.shell_error == 0
   else
     vim.notify("Unsupported operating system", vim.log.levels.ERROR)
     return false
   end
   
-  local full_cmd = string.format("%s '%s'", cmd, url)
-  local result = os.execute(full_cmd)
-  return result == 0 or result == true
+  -- For Unix-like systems, use jobstart for better error handling
+  local ok, job_id = pcall(vim.fn.jobstart, cmd, {
+    detach = true,
+    on_exit = function(_, exit_code)
+      if exit_code ~= 0 then
+        vim.schedule(function()
+          vim.notify("Failed to open URL (exit code: " .. exit_code .. ")", vim.log.levels.ERROR)
+        end)
+      end
+    end
+  })
+  
+  return ok and job_id > 0
 end
 
 -- Main function to open GitHub
@@ -162,9 +175,10 @@ function M.open_normal()
 end
 
 -- Open GitHub for selected lines (visual mode)
-function M.open_visual()
-  local line_start = vim.fn.line("'<")
-  local line_end = vim.fn.line("'>")
+function M.open_visual(line_start, line_end)
+  -- Use provided line numbers from command range
+  line_start = line_start or vim.fn.line("'<")
+  line_end = line_end or vim.fn.line("'>")
   M.open_github({ line_start = line_start, line_end = line_end })
 end
 
