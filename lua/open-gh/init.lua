@@ -161,6 +161,19 @@ function M.open_github(opts)
     end
   end
   
+  -- Validate URL starts with https://github.com/
+  -- Also ensure no credentials are present in the URL
+  if not url:match("^https://github%.com/") then
+    vim.notify(string.format("Invalid URL: '%s' must start with https://github.com/", url), vim.log.levels.ERROR)
+    return
+  end
+  
+  -- Check for credentials in URL (security check)
+  if url:match("https://[^@]+@github%.com/") then
+    vim.notify("Invalid URL: Credentials are not allowed in GitHub URLs", vim.log.levels.ERROR)
+    return
+  end
+  
   -- Open the URL
   if open_url(url) then
     vim.notify("Opened: " .. url, vim.log.levels.INFO)
